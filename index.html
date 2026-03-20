@@ -728,7 +728,7 @@ td{padding:9px 11px;font-size:12.5px;color:var(--ink);vertical-align:middle}
 <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
 const SB_URL='https://unbhrmbeaiajpqxicfwd.supabase.co',SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVuYmhybWJlYWlhanBxeGljZndkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MjYzOTUsImV4cCI6MjA4OTUwMjM5NX0.QN3O6RmmwhboKk9PcFrbxXEsrZrtF31Hlnj5WzpxX4U';
 const ADMIN_EMAIL='timebackautomations26@gmail.com',SUP_WA='+233530710628',SUP_EM='timebackautomations26@gmail.com';
-const IS_DEMO=SB_URL==='YOUR_SUPABASE_URL';
+const IS_DEMO=SB_URL==='https://unbhrmbeaiajpqxicfwd.supabase.co';
 let sb,CU=null,SCH={},isAdmin=false;
 const CLASSES=['Creche','Nursery','KG 1','KG 2','Basic 1','Basic 2','Basic 3','Basic 4','Basic 5','Basic 6','Basic 7','Basic 8','Basic 9'];
 const DEF_FEES={Creche:250,Nursery:280,'KG 1':300,'KG 2':300,'Basic 1':350,'Basic 2':350,'Basic 3':350,'Basic 4':400,'Basic 5':400,'Basic 6':400,'Basic 7':500,'Basic 8':500,'Basic 9':500};
@@ -749,6 +749,162 @@ function getPayments(){return sg('payments')||[]}
 function getFeeding(){return sg('feeding')||{}}
 function getCommLog(){return sg('commlog')||[]}
 function getASchools(){return getGlobalSchools()}
+
+// ── SUPABASE DATA LAYER ──────────────────────────────────────────
+// All reads/writes go through these functions.
+// In DEMO mode  → localStorage only.
+// In LIVE mode  → Supabase + localStorage cache for speed.
+
+// SCHOOL PROFILE
+async function dbSaveSchool(data){
+  ss('school', data); // always cache locally
+  if(IS_DEMO||!sb||!CU) return;
+  const{error}=await sb.from('schools').upsert({
+    user_id:CU.id, name:data.name, admin_name:data.admin_name,
+    phone:data.phone, email:data.email, address:data.address,
+    motto:data.motto, term:data.term, year:data.year,
+    feeding_fee:data.feedingFee,
+    class_fees:data.classFees||{},
+    tpl_payment:data.tplPay, tpl_reminder:data.tplRem,
+    sms_config:data.smsConfig||{}
+  },{onConflict:'user_id'});
+  if(error) console.warn('dbSaveSchool error:',error.message);
+}
+
+async function dbLoadSchool(){
+  if(IS_DEMO||!sb||!CU) return getSchool();
+  const{data,error}=await sb.from('schools').select('*').eq('user_id',CU.id).single();
+  if(error||!data) return getSchool();
+  const mapped={
+    name:data.name||'', admin_name:data.admin_name||'',
+    phone:data.phone||'', email:data.email||'',
+    address:data.address||'', motto:data.motto||'',
+    term:data.term||'Term 2', year:data.year||'2025/2026',
+    feedingFee:Number(data.feeding_fee)||15,
+    classFees:data.class_fees||{...DEF_FEES},
+    tplPay:data.tpl_payment||DEF_TPL_PAY,
+    tplRem:data.tpl_reminder||DEF_TPL_REM,
+    smsConfig:data.sms_config||{}
+  };
+  ss('school', mapped); // update local cache
+  return mapped;
+}
+
+// STUDENTS
+async function dbSaveStudent(s){
+  // update local cache first
+  const list=getStudents();
+  const idx=list.findIndex(x=>x.id===s.id);
+  if(idx>=0) list[idx]=s; else list.push(s);
+  ss('students',list);
+  if(IS_DEMO||!sb||!CU) return;
+  const{error}=await sb.from('students').upsert({
+    id:s.id, user_id:CU.id,
+    fn:s.fn, ln:s.ln, cls:s.cls, gen:s.gen,
+    par:s.par, ph:s.ph, em:s.em||null,
+    term_fee:s.termFee, paid:s.paid,
+    method:s.method||null, last_pay:s.lastPay||null
+  },{onConflict:'id'});
+  if(error) console.warn('dbSaveStudent error:',error.message);
+}
+
+async function dbDeleteStudent(id){
+  const list=getStudents().filter(x=>x.id!==id);
+  ss('students',list);
+  if(IS_DEMO||!sb||!CU) return;
+  const{error}=await sb.from('students').delete().eq('id',id).eq('user_id',CU.id);
+  if(error) console.warn('dbDeleteStudent error:',error.message);
+}
+
+async function dbLoadStudents(){
+  if(IS_DEMO||!sb||!CU) return getStudents();
+  const{data,error}=await sb.from('students').select('*').eq('user_id',CU.id).order('fn');
+  if(error||!data) return getStudents();
+  const mapped=data.map(r=>({
+    id:r.id, fn:r.fn, ln:r.ln, cls:r.cls, gen:r.gen||'',
+    par:r.par||'', ph:r.ph||'', em:r.em||'',
+    termFee:Number(r.term_fee)||400, paid:Number(r.paid)||0,
+    method:r.method||null, lastPay:r.last_pay||null
+  }));
+  ss('students', mapped);
+  return mapped;
+}
+
+// PAYMENTS
+async function dbSavePayment(p){
+  const list=getPayments();
+  list.push(p);
+  ss('payments',list);
+  if(IS_DEMO||!sb||!CU) return;
+  const{error}=await sb.from('payments').insert({
+    id:p.id, user_id:CU.id,
+    si:p.si, sn:p.sn, sc:p.sc,
+    amt:p.amt, mth:p.mth, dt:p.dt,
+    txn:p.txn, ba:p.ba, notes:p.notes||null
+  });
+  if(error) console.warn('dbSavePayment error:',error.message);
+}
+
+async function dbLoadPayments(){
+  if(IS_DEMO||!sb||!CU) return getPayments();
+  const{data,error}=await sb.from('payments').select('*').eq('user_id',CU.id).order('dt',{ascending:false});
+  if(error||!data) return getPayments();
+  const mapped=data.map(r=>({
+    id:r.id, si:r.si, sn:r.sn, sc:r.sc,
+    amt:Number(r.amt), mth:r.mth, dt:r.dt,
+    txn:r.txn, ba:Number(r.ba), notes:r.notes||''
+  }));
+  ss('payments', mapped);
+  return mapped;
+}
+
+// FEEDING
+async function dbMarkFeeding(studentId, dateStr){
+  const f=getFeeding();
+  f[studentId+'_'+dateStr]=true;
+  ss('feeding',f);
+  if(IS_DEMO||!sb||!CU) return;
+  const{error}=await sb.from('feeding').upsert({
+    user_id:CU.id, student_id:studentId, feed_date:dateStr
+  },{onConflict:'user_id,student_id,feed_date',ignoreDuplicates:true});
+  if(error) console.warn('dbMarkFeeding error:',error.message);
+}
+
+async function dbLoadFeeding(){
+  if(IS_DEMO||!sb||!CU) return getFeeding();
+  const{data,error}=await sb.from('feeding').select('student_id,feed_date').eq('user_id',CU.id);
+  if(error||!data) return getFeeding();
+  const f={};
+  data.forEach(r=>{ f[r.student_id+'_'+r.feed_date]=true; });
+  ss('feeding',f);
+  return f;
+}
+
+// COMM LOG
+async function dbSaveCommLog(entry){
+  const log=getCommLog();
+  log.unshift(entry);
+  ss('commlog', log.slice(0,100));
+  if(IS_DEMO||!sb||!CU) return;
+  const{error}=await sb.from('comm_log').insert({
+    user_id:CU.id, ch:entry.ch, type:entry.type,
+    rec:entry.rec, stu:entry.stu, txn:entry.txn
+  });
+  if(error) console.warn('dbSaveCommLog error:',error.message);
+}
+
+async function dbLoadCommLog(){
+  if(IS_DEMO||!sb||!CU) return getCommLog();
+  const{data,error}=await sb.from('comm_log').select('*').eq('user_id',CU.id)
+    .order('sent_at',{ascending:false}).limit(100);
+  if(error||!data) return getCommLog();
+  const mapped=data.map(r=>({
+    t:new Date(r.sent_at).toLocaleString('en-GH'),
+    ch:r.ch, type:r.type, rec:r.rec, stu:r.stu, txn:r.txn
+  }));
+  ss('commlog', mapped);
+  return mapped;
+}
 function genId(p){return p+Date.now().toString(36).toUpperCase()+Math.random().toString(36).substr(2,4).toUpperCase()}
 function genTxn(){const d=new Date();return'SL-'+String(d.getFullYear()).slice(-2)+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')+'-'+Math.random().toString(36).substr(2,6).toUpperCase()}
 function today(){return new Date().toISOString().split('T')[0]}
@@ -972,14 +1128,16 @@ function sendBC(ch){
 function renderATickets(){document.getElementById('a-tickets').innerHTML='<div class="empty"><div class="ei">&#127881;</div><div class="et">No open tickets</div><div class="es">All schools running smoothly</div></div>'}
 function submitTicket(){const t=gv('tk-title');if(!t){toast('Please enter a title','warn');return}closeMdl('m-ticket');window.open('mailto:'+SUP_EM+'?subject=SchoolLedger Support ['+gv('tk-pri')+']: '+t+'&body='+gv('tk-desc'),'_blank');toast('Ticket submitted via email')}
 
-function bootSchool(){
-  SCH=getSchool();
-  syncSchoolToRegistry(); // refresh admin panel on every school login
+async function bootSchool(){
+  SCH=await dbLoadSchool();
+  syncSchoolToRegistry();
   document.getElementById('sb-sch-name').textContent=SCH.name||'Your School';
   document.getElementById('sb-sch-term').textContent=(SCH.term||'Term 2')+' - '+(SCH.year||'2025/2026');
   document.getElementById('tb-term').textContent=(SCH.term||'Term 2')+' - '+(SCH.year||'2025/2026');
   document.getElementById('sb-av').textContent=(SCH.name||'S')[0].toUpperCase();
   document.getElementById('sb-uname').textContent=SCH.admin_name||CU.email?.split('@')[0]||'Admin';
+  // Load all data from Supabase into local cache before rendering
+  await Promise.all([dbLoadStudents(), dbLoadPayments(), dbLoadFeeding(), dbLoadCommLog()]);
   renderDashboard();popFeeSelect();renderPayHistory();renderFeeding();renderCommLog();loadSettings();
 }
 
@@ -1030,16 +1188,17 @@ function renderStudents(){
   document.getElementById('stu-tbody').innerHTML=list.length?list.map(x=>{const bal=x.termFee-x.paid,st=bal===0?'paid':x.paid>0?'partial':'owing';return'<tr onclick="showStuDetail(\''+x.id+'\')"><td><div class="tn">'+x.fn+' '+x.ln+'</div><div class="tid">'+x.id+'</div></td><td><span class="bdg b-c">'+x.cls+'</span></td><td style="font-family:JetBrains Mono,monospace;font-size:11px">'+fmtM(x.termFee)+'</td><td style="font-weight:700;color:var(--g2)">'+fmtM(x.paid)+'</td><td style="font-weight:700;color:'+(bal>0?'var(--red)':'var(--g2)')+'">'+fmtM(bal)+'</td><td><span class="bdg b-'+st+'">'+(st==='paid'?'Paid':st==='partial'?'Partial':'Owing')+'</span></td><td onclick="event.stopPropagation()" style="display:flex;gap:4px;padding:7px 11px">'+(bal>0?'<button class="btn btn-g btn-xs" onclick="goPayStu(\''+x.id+'\')">Pay</button>':'')+'<a href="'+buildWALink(x)+'" target="_blank" class="btn btn-wa btn-xs" onclick="event.stopPropagation()">WA</a></td></tr>'}).join(''):'<tr><td colspan="7"><div class="empty"><div class="ei">&#127891;</div><div class="et">'+(s.length?'No match':'No students yet')+'</div><div class="es">'+(s.length?'Try a different filter':'Click + Add Student to get started')+'</div></div></td></tr>';
 }
 
-function addStudent(){
+async function addStudent(){
   const fn=gv('as-fn'),ln=gv('as-ln'),par=gv('as-par'),ph=gv('as-ph');
   if(!fn||!ln||!par||!ph){toast('Please fill all required fields','warn');return}
   const cls=gv('as-cls'),sch=getSchool();
   const fee=parseFloat(gv('as-fee'))||(sch.classFees?.[cls]||DEF_FEES[cls]||400);
   const s=getStudents();
-  s.push({id:genId('S'),fn,ln,cls,gen:gv('as-gen'),par,ph,em:gv('as-em'),termFee:fee,paid:0,method:null,lastPay:null});
-  ss('students',s);closeMdl('m-add-stu');
+  const newStu={id:genId('S'),fn,ln,cls,gen:gv('as-gen'),par,ph,em:gv('as-em'),termFee:fee,paid:0,method:null,lastPay:null};
+  await dbSaveStudent(newStu);
+  closeMdl('m-add-stu');
   ['as-fn','as-ln','as-par','as-ph','as-em','as-fee'].forEach(id=>sv(id,''));
-  syncSchoolToRegistry(); // update admin panel student count
+  syncSchoolToRegistry();
   renderStudents();renderDashboard();popFeeSelect();popCommSelects();
   toast(fn+' '+ln+' added to '+cls);
 }
@@ -1052,7 +1211,7 @@ function showStuDetail(id){
   document.getElementById('sd-body').innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px"><div style="background:var(--BG);border-radius:var(--RS);padding:10px;text-align:center"><div style="font-size:8.5px;font-family:JetBrains Mono,monospace;text-transform:uppercase;letter-spacing:1px;color:var(--ink3);margin-bottom:3px">Term Fee</div><div style="font-family:Playfair Display,serif;font-size:19px;font-weight:700">'+fmtM(s.termFee)+'</div></div><div style="background:var(--'+(st==='paid'?'mint2':st==='partial'?'ambL':'redL')+');border-radius:var(--RS);padding:10px;text-align:center"><div style="font-size:8.5px;font-family:JetBrains Mono,monospace;text-transform:uppercase;letter-spacing:1px;color:var(--ink3);margin-bottom:3px">Balance</div><div style="font-family:Playfair Display,serif;font-size:19px;font-weight:700;color:var(--'+(st==='paid'?'g2':st==='partial'?'amb':'red')+')">'+fmtM(bal)+'</div></div></div><div style="font-size:12.5px;color:var(--ink2);line-height:2.1"><div><strong>Parent:</strong> '+s.par+'</div><div><strong>Phone:</strong> '+s.ph+'</div>'+(s.em?'<div><strong>Email:</strong> '+s.em+'</div>':'')+'<div><strong>Last Payment:</strong> '+fmtD(s.lastPay)+'</div><div><strong>Method:</strong> '+(s.method||'-')+'</div></div>';
   document.getElementById('sd-wa').onclick=()=>window.open(buildWALink(s),'_blank');
   document.getElementById('sd-pay').onclick=()=>{closeMdl('m-stu-detail');goPayStu(s.id)};
-  document.getElementById('sd-del').onclick=()=>{if(confirm('Remove '+s.fn+' '+s.ln+'? Cannot be undone.')){ss('students',getStudents().filter(x=>x.id!==s.id));closeMdl('m-stu-detail');renderStudents();renderDashboard();popFeeSelect();toast(s.fn+' '+s.ln+' removed')}};
+  document.getElementById('sd-del').onclick=()=>{if(confirm('Remove '+s.fn+' '+s.ln+'? Cannot be undone.')){dbDeleteStudent(s.id).then(()=>{closeMdl('m-stu-detail');renderStudents();renderDashboard();popFeeSelect();syncSchoolToRegistry();toast(s.fn+' '+s.ln+' removed');})}};
   openMdl('m-stu-detail');
 }
 
@@ -1097,7 +1256,7 @@ function updateFeePrev(){
   document.getElementById('f-wa-prev').innerHTML='<div class="wa-wrap"><div class="wa-lbl">To: '+s.par+' ('+s.ph+')</div><div class="wa-bub">'+waMsg.replace(/\n/g,'<br/>')+'</div><div class="wa-t">Preview</div></div>';
 }
 
-function recordPayment(){
+async function recordPayment(){
   const id=gv('f-stu'),amt=parseFloat(gv('f-amt')),mth=gv('f-mth'),dt=gv('f-date')||today();
   if(!id){toast('Please select a student','warn');return}
   if(!amt||amt<=0){toast('Please enter a valid amount','warn');return}
@@ -1105,8 +1264,10 @@ function recordPayment(){
   const maxPay=s.termFee-s.paid;
   if(amt>maxPay+0.01){toast('Max payable: '+fmtM(maxPay),'warn');return}
   const txn=genTxn(),newPaid=Math.min(s.paid+amt,s.termFee),newBal=s.termFee-newPaid;
-  s.paid=newPaid;s.method=mth;s.lastPay=dt;ss('students',students);
-  const pays=getPayments();pays.push({id:genId('P'),si:s.id,sn:s.fn+' '+s.ln,sc:s.cls,amt,mth,dt,txn,ba:newBal,notes:gv('f-notes')});ss('payments',pays);
+  s.paid=newPaid;s.method=mth;s.lastPay=dt;
+  await dbSaveStudent(s); // update student paid amount in Supabase
+  const payObj={id:genId('P'),si:s.id,sn:s.fn+' '+s.ln,sc:s.cls,amt,mth,dt,txn,ba:newBal,notes:gv('f-notes')};
+  await dbSavePayment(payObj); // save payment row to Supabase
   const sch=getSchool(),waMsg=buildPayMsg(s,amt,newBal,txn);
   document.getElementById('po-sch').textContent=sch.name||'Your School';
   document.getElementById('po-amt').textContent=fmtM(amt);
@@ -1137,8 +1298,8 @@ function renderFeeding(){
   document.getElementById('feed-tbody').innerHTML=s.length?s.map(x=>{const days=Object.keys(f).filter(k=>k.startsWith(x.id+'_')).length,pnow=f[x.id+'_'+td];return'<tr><td><div class="tn">'+x.fn+' '+x.ln+'</div><div class="tid">'+x.id+'</div></td><td><span class="bdg b-c">'+x.cls+'</span></td><td style="font-family:JetBrains Mono,monospace;font-size:11px">'+fmtM(rate)+'</td><td>'+days+' days</td><td style="color:var(--g2);font-weight:600">'+fmtM(days*rate)+'</td><td><span class="bdg '+(pnow?'b-p':'b-o')+'">'+(pnow?'Paid':'Unpaid')+'</span></td><td style="padding:7px 11px">'+(pnow?'<span style="font-size:10.5px;color:var(--ink3)">Done</span>':'<button class="btn btn-g btn-xs" onclick="markFeeding(\''+x.id+'\')">Mark Paid</button>')+'</td></tr>'}).join(''):'<tr><td colspan="7"><div class="empty"><div class="ei">&#127859;</div><div class="et">No students enrolled</div><div class="es">Add students to track feeding</div></div></td></tr>';
 }
 
-function markFeeding(id){const f=getFeeding();f[id+'_'+today()]=true;ss('feeding',f);renderFeeding()}
-function markAllFeeding(){const s=getStudents();if(!s.length){toast('No students enrolled','warn');return}const f=getFeeding();s.forEach(x=>{f[x.id+'_'+today()]=true});ss('feeding',f);renderFeeding();toast(s.length+' students marked as paid today')}
+function markFeeding(id){dbMarkFeeding(id,today()).then(()=>renderFeeding())}
+function markAllFeeding(){const s=getStudents();if(!s.length){toast('No students enrolled','warn');return}Promise.all(s.map(x=>dbMarkFeeding(x.id,today()))).then(()=>{renderFeeding();toast(s.length+' students marked as paid today')})}
 
 function cTab(t){document.querySelectorAll('.ctab').forEach(x=>x.classList.remove('on'));document.querySelectorAll('.cpanel').forEach(x=>x.classList.remove('on'));document.querySelector('.ctab-'+t).classList.add('on');document.getElementById('cp-'+t).classList.add('on');if(t==='wa')updateCommPrev()}
 
@@ -1194,7 +1355,7 @@ function sendComm(ch){
   }
 }
 
-function logComm(type,rec,stu,txn,ch){const log=getCommLog();log.unshift({t:new Date().toLocaleString('en-GH'),type,rec,stu,txn,ch});ss('commlog',log.slice(0,100));renderCommLog()}
+function logComm(type,rec,stu,txn,ch){const entry={t:new Date().toLocaleString('en-GH'),type,rec,stu,txn,ch};dbSaveCommLog(entry).then(()=>renderCommLog())}
 function renderCommLog(){const el=document.getElementById('comm-log');if(!el)return;const log=getCommLog();el.innerHTML=log.length?'<div class="tbl-wrap"><table style="min-width:360px"><thead><tr><th>Time</th><th>Channel</th><th>Type</th><th>Recipient</th></tr></thead><tbody>'+log.map(l=>'<tr><td style="font-size:10px;color:var(--ink3);white-space:nowrap">'+l.t+'</td><td><span class="bdg '+(l.ch==='WhatsApp'?'b-p':l.ch==='SMS'?'b-c':'b-g')+'">'+l.ch+'</span></td><td style="font-size:11.5px;text-transform:capitalize">'+l.type+'</td><td style="font-size:11.5px">'+l.rec+'</td></tr>').join('')+'</tbody></table></div>':'<div class="empty"><div class="es">No messages sent yet</div></div>'}
 function exportCommLog(){dlCSV([['Time','Channel','Type','Recipient','Student','TXN'],...getCommLog().map(l=>[l.t,l.ch,l.type,l.rec,l.stu,l.txn])],'CommLog_'+today()+'.csv')}
 
@@ -1226,29 +1387,31 @@ function syncSchoolToRegistry(){
   setGlobalSchools(registry);
 }
 
-function saveSettings(){
+async function saveSettings(){
   const s=getSchool();
   s.name=gv('set-name');s.address=gv('set-addr');s.phone=gv('set-phone');s.email=gv('set-email');s.motto=gv('set-motto');
   s.feedingFee=parseFloat(gv('set-feed'))||15;s.term=gv('set-term')||'Term 2';s.year=gv('set-year');
-  ss('school',s);SCH=s;
-  syncSchoolToRegistry(); // keep admin panel in sync
+  await dbSaveSchool(s);SCH=s;
+  syncSchoolToRegistry();
   document.getElementById('sb-sch-name').textContent=s.name||'Your School';
   document.getElementById('sb-sch-term').textContent=(s.term||'Term 2')+' - '+(s.year||'2025/2026');
   document.getElementById('tb-term').textContent=(s.term||'Term 2')+' - '+(s.year||'2025/2026');
   toast('Settings saved');
 }
 
-function saveClassFees(){const s=getSchool();s.classFees=s.classFees||{};CLASSES.forEach(c=>{const el=document.getElementById('cf-'+c.replace(/\s/g,'-'));if(el)s.classFees[c]=parseFloat(el.value)||DEF_FEES[c]||400});ss('school',s);SCH=s;toast('Class fees saved')}
-function saveTemplates(){
+async function saveClassFees(){const s=getSchool();s.classFees=s.classFees||{};CLASSES.forEach(c=>{const el=document.getElementById('cf-'+c.replace(/\s/g,'-'));if(el)s.classFees[c]=parseFloat(el.value)||DEF_FEES[c]||400});await dbSaveSchool(s);SCH=s;toast('Class fees saved')}
+async function saveTemplates(){
   const s=getSchool();
   s.tplPay=gv('tpl-pay')||DEF_TPL_PAY;
   s.tplRem=gv('tpl-rem')||DEF_TPL_REM;
-  ss('school',s);SCH=s;
+  await dbSaveSchool(s);SCH=s;
   toast('Templates saved');
 }
 
-function saveSMSConf(){
-  ss('sms_conf',{provider:gv('sms-prov'),key:gv('sms-key')});
+async function saveSMSConf(){
+  const s=getSchool();
+  s.smsConfig={provider:gv('sms-prov'),key:gv('sms-key')};
+  await dbSaveSchool(s);SCH=s;
   toast('SMS config saved');
 }
 
