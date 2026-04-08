@@ -1059,8 +1059,10 @@ function enterApp(user){
   }
 }
 
-function bootAdmin(){
+async function bootAdmin(){
   document.getElementById('a-date').textContent=new Date().toLocaleDateString('en-GH',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const schools=await dbLoadAllSchools();
+  setGlobalSchools(schools);
   renderAOverview();
 }
 
