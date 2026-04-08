@@ -790,6 +790,26 @@ async function dbLoadSchool(){
   return mapped;
 }
 
+  async function dbLoadAllSchools(){
+  const{data,error}=await sb.from('schools')
+    .select('*')
+    .order('name');
+  if(error||!data) return[];
+  return data.map(r=>({
+    id:r.user_id,
+    name:r.name||'',
+    admin_name:r.admin_name||'',
+    phone:r.phone||'',
+    email:r.email||'',
+    term:r.term||'Term 2',
+    year:r.year||'2025/2026',
+    address:r.address||'',
+    studentCount:r.student_count||0,
+    feesCollected:r.fees_collected||0,
+    createdAt:r.created_at||''
+  }));
+}
+
 // STUDENTS
 async function dbSaveStudent(s){
   // update local cache first
