@@ -793,6 +793,7 @@ async function dbLoadSchool(){
   async function dbLoadAllSchools(){
   const{data,error}=await sb.from('schools')
     .select('*')
+    .neq('email','timebackautomations26@gmail.com')
     .order('name');
   if(error||!data) return[];
   return data.map(r=>({
