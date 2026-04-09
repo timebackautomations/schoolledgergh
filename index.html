@@ -733,7 +733,7 @@ let sb,CU=null,SCH={},isAdmin=false;
 const CLASSES=['Creche','Nursery','KG 1','KG 2','Basic 1','Basic 2','Basic 3','Basic 4','Basic 5','Basic 6','Basic 7','Basic 8','Basic 9'];
 const DEF_FEES={Creche:250,Nursery:280,'KG 1':300,'KG 2':300,'Basic 1':350,'Basic 2':350,'Basic 3':350,'Basic 4':400,'Basic 5':400,'Basic 6':400,'Basic 7':500,'Basic 8':500,'Basic 9':500};
 const DEF_TPL_PAY='Dear {parent_name},\n\nPayment Confirmed!\nStudent: {student_name} ({student_id})\nAmount: GH{amount}\nMethod: {method}\nDate: {date}\nTXN: {txn_id}\n\n{balance_msg}\n\nThank you!\n- {school_name}';
-const DEF_TPL_REM='Dear {parent_name},\n\nFee Reminder\nStudent: {student_name} ({student_id})\nBalance: GH{balance}\nTerm: {term}\n\nPlease pay at school or via Mobile Money.\nHelp: +233530710628\n\n- {school_name}';
+const DEF_TPL_REM='Dear {parent_name},\n\nFee Reminder\nStudent: {student_name} ({student_id})\nBalance: GH{balance}\nTerm: {term}\n\nPlease pay at school or via Mobile Money.\nHelp: {school_phone}\n\n- {school_name}';
 
 function setView(v){document.body.setAttribute('data-view',v)}
 function sk(k){return'slgh3_'+(CU?CU.id:'x')+'_'+k}
@@ -1254,7 +1254,7 @@ function goPayStu(id){sNav('fees');setTimeout(()=>{sv('f-stu',id);onFeeChange()}
 
 function buildWALink(s){
   const bal=s.termFee-s.paid,sch=getSchool();
-  const msg=(sch.tplRem||DEF_TPL_REM).replace(/{parent_name}/g,s.par).replace(/{student_name}/g,s.fn+' '+s.ln).replace(/{student_id}/g,s.id).replace(/{balance}/g,bal.toFixed(2)).replace(/{term}/g,sch.term||'Term 2').replace(/{school_name}/g,sch.name||'School');
+  const msg=(sch.tplRem||DEF_TPL_REM).replace(/{parent_name}/g,s.par).replace(/{student_name}/g,s.fn+' '+s.ln).replace(/{student_id}/g,s.id).replace(/{balance}/g,bal.toFixed(2)).replace(/{term}/g,sch.term||'Term 2').replace(/{school_name}/g,sch.name||'School').replace(/{school_phone}/g,sch.phone||SUP_WA);
   return'https://wa.me/233'+s.ph.replace(/^0/,'')+'?text='+encodeURIComponent(msg);
 }
 
@@ -1279,7 +1279,7 @@ function onFeeChange(){
 function buildPayMsg(s,amt,newBal,txn){
   const sch=getSchool();
   const bm=newBal<=0?'Term fees FULLY PAID. Thank you!':'Balance remaining: GH'+newBal.toFixed(2)+'. Please pay before end of term.';
-  return(sch.tplPay||DEF_TPL_PAY).replace(/{parent_name}/g,s.par).replace(/{student_name}/g,s.fn+' '+s.ln).replace(/{student_id}/g,s.id).replace(/{amount}/g,Number(amt).toFixed(2)).replace(/{method}/g,gv('f-mth')||'Cash').replace(/{date}/g,fmtD(gv('f-date')||today())).replace(/{txn_id}/g,txn).replace(/{balance_msg}/g,bm).replace(/{school_name}/g,sch.name||'School');
+  return(sch.tplPay||DEF_TPL_PAY).replace(/{parent_name}/g,s.par).replace(/{student_name}/g,s.fn+' '+s.ln).replace(/{student_id}/g,s.id).replace(/{amount}/g,Number(amt).toFixed(2)).replace(/{method}/g,gv('f-mth')||'Cash').replace(/{date}/g,fmtD(gv('f-date')||today())).replace(/{txn_id}/g,txn).replace(/{balance_msg}/g,bm).replace(/{school_name}/g,sch.name||'School').replace(/{school_phone}/g,sch.phone||SUP_WA);
 }
 
 function updateFeePrev(){
@@ -1375,7 +1375,7 @@ function sendComm(ch){
   if(ch==='wa'){
     const list=commStudents('wa');if(!list.length){toast('No matching students','warn');return}
     if(list.length===1)window.open(buildWALink(list[0]),'_blank');
-    else{const sch=getSchool(),custom=gv('wa-custom'),msg=(custom||'Important announcement from '+(sch.name||'School'))+'\n\n- '+(sch.name||'School');window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank')}
+    else{const sch=getSchool(),custom=gv('wa-custom'),msg=(custom||'Important announcement from '+(sch.name||'School'))+'\n\n- '+(sch.name||'School')+'\n'+(sch.phone||SUP_WA);window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank')}
     logComm('whatsapp',list.length+' parents','Bulk','-','WhatsApp');toast('WhatsApp opened for '+list.length+' recipient(s)');
   }else if(ch==='sms'){
     const msg=gv('sms-msg');if(!msg){toast('Please type an SMS message','warn');return}
